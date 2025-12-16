@@ -90,10 +90,19 @@ jobs:
             echo "has_stats=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Определяем период
+        id: determine_period
+        run: |
+          if [ -n "${{ github.event.inputs.mode }}" ]; then
+            echo "period=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+          else
+            echo "period=${{ steps.time_of_day.outputs.period }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Генерируем контент в зависимости от времени
         id: generate_content
         run: |
-          PERIOD="${github.event.inputs.mode || steps.time_of_day.outputs.period}"
+          PERIOD="${{ steps.determine_period.outputs.period }}"
           CONTENT=""
           
           case $PERIOD in
@@ -138,6 +147,10 @@ jobs:
               CONTENT+="*Главный урок недели:*\n"
               CONTENT+="• \n"
               ;;
+            "статистика")
+              CONTENT+="*СТАТИСТИКА*\n\n"
+              CONTENT+="Здесь будет ваша статистика...\n"
+              ;;
             *)
               CONTENT+="*РЕЖИМ: $PERIOD*\n\n"
               CONTENT+="*Что бы ты хотел сделать?*\n"
@@ -151,7 +164,6 @@ jobs:
           echo "content<<EOF" >> $GITHUB_OUTPUT
           echo "$CONTENT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-          echo "period=$PERIOD" >> $GITHUB_OUTPUT
 
       - name: Отправляем основное сообщение
         uses: appleboy/telegram-action@master
@@ -181,7 +193,7 @@ jobs:
             Серия дней: ${{ steps.check_stats.outputs.streak_days }}
             }
             
-            *Хорошего ${{ steps.generate_content.outputs.period }}а!*
+            *Хорошего ${{ steps.determine_period.outputs.period }}а!*
             *Ответь на это сообщение с твоими планами!*
           parse_mode: markdown
 
