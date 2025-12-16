@@ -1,0 +1,178 @@
+name: ☑ Менеджер задач
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Действие
+        required: true
+        type: choice
+        options:
+          - добавить
+          - список
+          - завершить
+          - статистика
+      task:
+        description: 'Название задачи (для добавления)'
+        required: false
+        type: string
+      category:
+        description: 'Категория'
+        required: false
+        type: choice
+        options:
+          - учеба
+          - личное
+          - работа
+      priority:
+        description: Приоритет
+        required: false
+        type: choice
+        options:
+          - высокий
+          - средний
+          - низкий
+
+jobs:
+  manage-tasks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Загружаем код
+        uses: actions/checkout@v4
+
+      - name: Обрабатываем действие
+        id: process_action
+        run: |
+          ACTION="${{ github.event.inputs.action }}"
+          TASK="${{ github.event.inputs.task }}"
+          CATEGORY="${{ github.event.inputs.category }}"
+          PRIORITY="${{ github.event.inputs.priority }}"
+          
+          # Проверяем наличие файла задач
+          if [ ! -f "tasks.json" ]; then
+            echo '{"tasks": [], "last_update": "", "total_completed": 0}' > tasks.json
+          fi
+          
+          case $ACTION in
+            "добавить")
+              if [ -z "$TASK" ]; then
+                echo "message=Не указана задача для добавления" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+              
+              # Генерируем ID задачи
+              TASK_ID="task_$(date +%s)"
+              
+              # Добавляем задачу
+              jq --arg id "$TASK_ID" \
+                 --arg task "$TASK" \
+                 --arg category "${CATEGORY:-не указана}" \
+                 --arg priority "${PRIORITY:-средний}" \
+                 --arg created "$(date +"%Y-%m-%d %H:%M:%S")" \
+                 --arg status "не начато" \
+                 '.tasks += [{"id": $id, "task": $task, "category": $category, "priority": $priority, "created": $created, "status": $status}] | .last_update = $created' \
+                 tasks.json > temp_tasks.json
+              mv temp_tasks.json tasks.json
+              
+              echo "message=✓ Задача добавлена: **$TASK**" >> $GITHUB_OUTPUT
+              ;;
+              
+            "список")
+              # Получаем список задач
+              TASK_COUNT=$(jq -r '.tasks | length' tasks.json)
+              
+              if [ $TASK_COUNT -eq 0 ]; then
+                echo "message=Список задач пуст" >> $GITHUB_OUTPUT
+              else
+                TASK_LIST=""
+                TASK_LIST+="*СПИСОК ЗАДАЧ ($TASK_COUNT)*\n\n"
+                
+                # Формируем список
+                for i in $(seq 0 $((TASK_COUNT - 1))); do
+                  TASK_NAME=$(jq -r ".tasks[$i].task" tasks.json)
+                  CATEGORY=$(jq -r ".tasks[$i].category" tasks.json)
+                  PRIORITY=$(jq -r ".tasks[$i].priority" tasks.json)
+                  STATUS=$(jq -r ".tasks[$i].status" tasks.json)
+                  
+                  # Эмодзи для статуса
+                  case $STATUS in
+                    "не начато") EMOJI="🔴" ;;
+                    "в процессе") EMOJI="🟡" ;;
+                    "выполнено") EMOJI="🟢" ;;
+                    "отложено") EMOJI="⏸️" ;;
+                    *) EMOJI="📌" ;;
+                  esac
+                  
+                  # Эмодзи для приоритета
+                  case $PRIORITY in
+                    "высокий") PRIORITY_EMOJI="🔺" ;;
+                    "средний") PRIORITY_EMOJI="🟡" ;;
+                    "низкий") PRIORITY_EMOJI="🔻" ;;
+                    *) PRIORITY_EMOJI="📌" ;;
+                  esac
+                  
+                  TASK_LIST+="$EMOJI $PRIORITY_EMOJI *$TASK_NAME*\n"
+                  TASK_LIST+="   Категория: $CATEGORY | Статус: $STATUS\n\n"
+                done
+                
+                echo "message<<EOF" >> $GITHUB_OUTPUT
+                echo "$TASK_LIST" >> $GITHUB_OUTPUT
+                echo "EOF" >> $GITHUB_OUTPUT
+              fi
+              ;;
+              
+            "статистика")
+              TASK_COUNT=$(jq -r '.tasks | length' tasks.json)
+              COMPLETED=$(jq -r '.total_completed' tasks.json)
+              LAST_UPDATE=$(jq -r '.last_update' tasks.json)
+              
+              if [ -z "$LAST_UPDATE" ] || [ "$LAST_UPDATE" = "null" ]; then
+                LAST_UPDATE="никогда"
+              fi
+              
+              STATS_MESSAGE="*СТАТИСТИКА ЗАДАЧ*\n\n"
+              STATS_MESSAGE+="• Всего задач: $TASK_COUNT\n"
+              STATS_MESSAGE+="• Выполнено: $COMPLETED\n"
+              STATS_MESSAGE+="• Последнее обновление: $LAST_UPDATE\n\n"
+              
+              if [ $TASK_COUNT -gt 0 ]; then
+                COMPLETION_RATE=$((COMPLETED * 100 / TASK_COUNT))
+                STATS_MESSAGE+="*Прогресс: $COMPLETION_RATE% выполнено*\n"
+                
+                if [ $COMPLETION_RATE -ge 80 ]; then
+                  STATS_MESSAGE+="Отличная работа! Продолжай в том же духе!\n"
+                elif [ $COMPLETION_RATE -ge 50 ]; then
+                  STATS_MESSAGE+="Хорошие результаты! Можно лучше!\n"
+                else
+                  STATS_MESSAGE+="Есть над чем поработать! Не сдавайся!\n"
+                fi
+              fi
+              
+              echo "message<<EOF" >> $GITHUB_OUTPUT
+              echo "$STATS_MESSAGE" >> $GITHUB_OUTPUT
+              echo "EOF" >> $GITHUB_OUTPUT
+              ;;
+              
+            *)
+              echo "message=❌ Неизвестное действие: $ACTION" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+      - name: Отправляем результат
+        if: steps.process_action.outputs.message
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ${{ steps.process_action.outputs.message }}
+          parse_mode: markdown
+
+      - name: Сохраняем изменения
+        if: github.event.inputs.action == 'добавить'
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git add tasks.json
+          git commit -m "Добавлена новая задача: ${{ github.event.inputs.task }}" || echo "Нет изменений"
+          git push || echo "Нечего пушить"

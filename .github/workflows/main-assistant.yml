@@ -1,0 +1,210 @@
+name: Главный персональный ассистент
+
+on:
+  schedule:
+    # Комплексное расписание
+    - cron: '0 8 * * *'  # Утро - 8:00
+    - cron: '0 12 * * *' # День - 12:00
+    - cron: '0 18 * * *' # Вечер - 18:00
+    - cron: '0 21 * * *' # Ночь - 21:00
+    - cron: '0 20 * * 0' # Воскресенье - 20:00 (недельный отчет)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Режим работы'
+        required: true
+        type: choice
+        options:
+          - утро
+          - день
+          - вечер
+          - отчет
+          - статистика
+
+jobs:
+  main-processor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Загружаем код
+        uses: actions/checkout@v4
+
+      - name: Определяем время суток
+        id: time_of_day
+        run: |
+          HOUR=$(date +%H)
+          if [ $HOUR -ge 6 ] && [ $HOUR -lt 12 ]; then
+            echo "period=утро" >> $GITHUB_OUTPUT
+            echo "greeting=Доброе утро!" >> $GITHUB_OUTPUT
+          elif [ $HOUR -ge 12 ] && [ $HOUR -lt 18 ]; then
+            echo "period=день" >> $GITHUB_OUTPUT
+            echo "greeting=Добрый день!" >> $GITHUB_OUTPUT
+          elif [ $HOUR -ge 18 ] && [ $HOUR -lt 22 ]; then
+            echo "period=вечер" >> $GITHUB_OUTPUT
+            echo "greeting=Добрый вечер!" >> $GITHUB_OUTPUT
+          else
+            echo "period=ночь" >> $GITHUB_OUTPUT
+            echo "greeting=Доброй ночи!" >> $GITHUB_OUTPUT
+          fi
+          echo "current_hour=$HOUR" >> $GITHUB_OUTPUT
+          echo "today=$(date +"%d.%m.%Y")" >> $GITHUB_OUTPUT
+          echo "weekday=$(date +%A)" >> $GITHUB_OUTPUT
+
+      - name: Выбираем сообщения
+        id: select_messages
+        run: |
+          # Случайное приветствие
+          GREETINGS_COUNT=$(jq -r '.greetings | length' messages_database.json)
+          GREETING_INDEX=$((RANDOM % GREETINGS_COUNT))
+          GREETING=$(jq -r ".greetings[$GREETING_INDEX]" messages_database.json)
+          
+          # Случайная мотивация
+          MOTIVATION_COUNT=$(jq -r '.motivation | length' messages_database.json)
+          MOTIVATION_INDEX=$((RANDOM % MOTIVATION_COUNT))
+          MOTIVATION=$(jq -r ".motivation[$MOTIVATION_INDEX]" messages_database.json)
+          
+          # Случайный совет
+          TIPS_COUNT=$(jq -r '.tips | length' messages_database.json)
+          TIP_INDEX=$((RANDOM % TIPS_COUNT))
+          TIP=$(jq -r ".tips[$TIP_INDEX]" messages_database.json)
+          
+          echo "greeting=$GREETING" >> $GITHUB_OUTPUT
+          echo "motivation=$MOTIVATION" >> $GITHUB_OUTPUT
+          echo "tip=$TIP" >> $GITHUB_OUTPUT
+
+      - name: Проверяем статистику
+        id: check_stats
+        run: |
+          # Проверяем наличие файла статистики
+          if [ -f "stats.json" ]; then
+            DAYS_ACTIVE=$(jq -r '.days_active' stats.json)
+            TASKS_COMPLETED=$(jq -r '.tasks_completed' stats.json)
+            PRODUCTIVITY_SCORE=$(jq -r '.productivity_score' stats.json)
+            STREAK_DAYS=$(jq -r '.streak_days' stats.json)
+            
+            echo "has_stats=true" >> $GITHUB_OUTPUT
+            echo "days_active=$DAYS_ACTIVE" >> $GITHUB_OUTPUT
+            echo "tasks_completed=$TASKS_COMPLETED" >> $GITHUB_OUTPUT
+            echo "productivity_score=$PRODUCTIVITY_SCORE" >> $GITHUB_OUTPUT
+            echo "streak_days=$STREAK_DAYS" >> $GITHUB_OUTPUT
+          else
+            echo "has_stats=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Генерируем контент в зависимости от времени
+        id: generate_content
+        run: |
+          PERIOD="${github.event.inputs.mode || steps.time_of_day.outputs.period}"
+          CONTENT=""
+          
+          case $PERIOD in
+            "утро")
+              CONTENT+="*ПЛАН НА ДЕНЬ*\n\n"
+              CONTENT+="1. Самая важная задача: \n"
+              CONTENT+="2. Вторая по важности: \n"
+              CONTENT+="3. Можно сделать если останется время: \n\n"
+              CONTENT+="*Расписание:*\n"
+              CONTENT+="• Утро (до 12:00): \n"
+              CONTENT+="• День (12:00-18:00): \n"
+              CONTENT+="• Вечер (после 18:00): \n"
+              ;;
+            "день")
+              CONTENT+="*СЕРЕДИНА ДНЯ - ПРОВЕРКА*\n\n"
+              CONTENT+="*Что уже сделано:*\n"
+              CONTENT+="1. \n"
+              CONTENT+="2. \n\n"
+              CONTENT+="*Что еще нужно сделать:*\n"
+              CONTENT+="1. \n"
+              CONTENT+="2. \n\n"
+              CONTENT+="*Нужен перерыв? Сделай паузу 5-10 минут!*\n"
+              ;;
+            "вечер")
+              CONTENT+="*ВЕЧЕРНЯЯ РЕФЛЕКСИЯ*\n\n"
+              CONTENT+="*Достижения сегодня:*\n"
+              CONTENT+="1. \n"
+              CONTENT+="2. \n\n"
+              CONTENT+="*Чему научился:*\n"
+              CONTENT+="• \n\n"
+              CONTENT+="*На завтра:*\n"
+              CONTENT+="1. \n"
+              ;;
+            "отчет")
+              CONTENT+="*НЕДЕЛЬНЫЙ ОТЧЕТ*\n\n"
+              CONTENT+="*Самые большие достижения:*\n"
+              CONTENT+="1. \n"
+              CONTENT+="2. \n\n"
+              CONTENT+="*Цели на следующую неделю:*\n"
+              CONTENT+="1. \n"
+              CONTENT+="2. \n\n"
+              CONTENT+="*Главный урок недели:*\n"
+              CONTENT+="• \n"
+              ;;
+            *)
+              CONTENT+="*РЕЖИМ: $PERIOD*\n\n"
+              CONTENT+="*Что бы ты хотел сделать?*\n"
+              CONTENT+="• Запланировать задачи\n"
+              CONTENT+="• Поставить цели\n"
+              CONTENT+="• Посмотреть статистику\n"
+              CONTENT+="• Получить совет\n"
+              ;;
+          esac
+          
+          echo "content<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "period=$PERIOD" >> $GITHUB_OUTPUT
+
+      - name: Отправляем основное сообщение
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            ${{ steps.time_of_day.outputs.greeting }}
+            ${{ steps.select_messages.outputs.greeting }}
+            
+            *${{ steps.time_of_day.outputs.weekday }}, ${{ steps.time_of_day.outputs.today }}*
+            Сейчас: $(date +"%H:%M")
+            
+            ${{ steps.generate_content.outputs.content }}
+            
+            *Совет:*
+            ${{ steps.select_messages.outputs.tip }}
+            
+            ${{ steps.select_messages.outputs.motivation }}
+            
+            @if (steps.check_stats.outputs.has_stats == 'true')
+            {
+            *Твоя статистика:*
+            Дней с ассистентом: ${{ steps.check_stats.outputs.days_active }}
+            Выполнено задач: ${{ steps.check_stats.outputs.tasks_completed }}
+            Продуктивность: ${{ steps.check_stats.outputs.productivity_score }}/100
+            Серия дней: ${{ steps.check_stats.outputs.streak_days }}
+            }
+            
+            *Хорошего ${{ steps.generate_content.outputs.period }}а!*
+            *Ответь на это сообщение с твоими планами!*
+          parse_mode: markdown
+
+      - name: Обновляем статистику
+        run: |
+          # Обновляем статистику активности
+          if [ -f "stats.json" ]; then
+            # Читаем текущую статистику
+            DAYS_ACTIVE=$(jq -r '.days_active' stats.json)
+            NEW_DAYS=$((DAYS_ACTIVE + 1))
+            
+            # Обновляем файл
+            jq --argjson days "$NEW_DAYS" '.days_active = $days' \
+               stats.json > temp_stats.json
+            mv temp_stats.json stats.json
+          else
+            # Создаем новую статистику
+            echo '{"days_active": 1, "tasks_completed": 0, "goals_achieved": 0, "productivity_score": 0, "streak_days": 0}' > stats.json
+          fi
+          
+          # Коммитим изменения
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git add stats.json
+          git commit -m "Обновлена статистика активности" || echo "Нет изменений"
+          git push || echo "Нечего пушить"
