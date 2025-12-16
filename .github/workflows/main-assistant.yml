@@ -48,6 +48,7 @@ jobs:
           echo "current_hour=$HOUR" >> $GITHUB_OUTPUT
           echo "today=$(date +"%d.%m.%Y")" >> $GITHUB_OUTPUT
           echo "weekday=$(date +%A)" >> $GITHUB_OUTPUT
+          echo "current_time=$(date +"%H:%M")" >> $GITHUB_OUTPUT
 
       - name: Выбираем сообщения
         id: select_messages
@@ -81,13 +82,18 @@ jobs:
             PRODUCTIVITY_SCORE=$(jq -r '.productivity_score' stats.json)
             STREAK_DAYS=$(jq -r '.streak_days' stats.json)
             
+            # Формируем статистику
+            STATS_TEXT="Твоя статистика:\n"
+            STATS_TEXT+="Дней с ассистентом: $DAYS_ACTIVE\n"
+            STATS_TEXT+="Выполнено задач: $TASKS_COMPLETED\n"
+            STATS_TEXT+="Продуктивность: $PRODUCTIVITY_SCORE/100\n"
+            STATS_TEXT+="Серия дней: $STREAK_DAYS\n\n"
+            
             echo "has_stats=true" >> $GITHUB_OUTPUT
-            echo "days_active=$DAYS_ACTIVE" >> $GITHUB_OUTPUT
-            echo "tasks_completed=$TASKS_COMPLETED" >> $GITHUB_OUTPUT
-            echo "productivity_score=$PRODUCTIVITY_SCORE" >> $GITHUB_OUTPUT
-            echo "streak_days=$STREAK_DAYS" >> $GITHUB_OUTPUT
+            echo "stats_text=$STATS_TEXT" >> $GITHUB_OUTPUT
           else
             echo "has_stats=false" >> $GITHUB_OUTPUT
+            echo "stats_text=" >> $GITHUB_OUTPUT
           fi
 
       - name: Определяем период
@@ -99,61 +105,60 @@ jobs:
             echo "period=${{ steps.time_of_day.outputs.period }}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Генерируем контент в зависимости от времени
+      - name: Генерируем контент
         id: generate_content
         run: |
           PERIOD="${{ steps.determine_period.outputs.period }}"
-          CONTENT=""
           
           case $PERIOD in
             "утро")
-              CONTENT+="*ПЛАН НА ДЕНЬ*\n\n"
+              CONTENT="ПЛАН НА ДЕНЬ\n\n"
               CONTENT+="1. Самая важная задача: \n"
               CONTENT+="2. Вторая по важности: \n"
               CONTENT+="3. Можно сделать если останется время: \n\n"
-              CONTENT+="*Расписание:*\n"
+              CONTENT+="Расписание:\n"
               CONTENT+="• Утро (до 12:00): \n"
               CONTENT+="• День (12:00-18:00): \n"
               CONTENT+="• Вечер (после 18:00): \n"
               ;;
             "день")
-              CONTENT+="*СЕРЕДИНА ДНЯ - ПРОВЕРКА*\n\n"
-              CONTENT+="*Что уже сделано:*\n"
+              CONTENT="СЕРЕДИНА ДНЯ - ПРОВЕРКА\n\n"
+              CONTENT+="Что уже сделано:\n"
               CONTENT+="1. \n"
               CONTENT+="2. \n\n"
-              CONTENT+="*Что еще нужно сделать:*\n"
+              CONTENT+="Что еще нужно сделать:\n"
               CONTENT+="1. \n"
               CONTENT+="2. \n\n"
-              CONTENT+="*Нужен перерыв? Сделай паузу 5-10 минут!*\n"
+              CONTENT+="Нужен перерыв? Сделай паузу 5-10 минут!\n"
               ;;
             "вечер")
-              CONTENT+="*ВЕЧЕРНЯЯ РЕФЛЕКСИЯ*\n\n"
-              CONTENT+="*Достижения сегодня:*\n"
+              CONTENT="ВЕЧЕРНЯЯ РЕФЛЕКСИЯ\n\n"
+              CONTENT+="Достижения сегодня:\n"
               CONTENT+="1. \n"
               CONTENT+="2. \n\n"
-              CONTENT+="*Чему научился:*\n"
+              CONTENT+="Чему научился:\n"
               CONTENT+="• \n\n"
-              CONTENT+="*На завтра:*\n"
+              CONTENT+="На завтра:\n"
               CONTENT+="1. \n"
               ;;
             "отчет")
-              CONTENT+="*НЕДЕЛЬНЫЙ ОТЧЕТ*\n\n"
-              CONTENT+="*Самые большие достижения:*\n"
+              CONTENT="НЕДЕЛЬНЫЙ ОТЧЕТ\n\n"
+              CONTENT+="Самые большие достижения:\n"
               CONTENT+="1. \n"
               CONTENT+="2. \n\n"
-              CONTENT+="*Цели на следующую неделю:*\n"
+              CONTENT+="Цели на следующую неделю:\n"
               CONTENT+="1. \n"
               CONTENT+="2. \n\n"
-              CONTENT+="*Главный урок недели:*\n"
+              CONTENT+="Главный урок недели:\n"
               CONTENT+="• \n"
               ;;
             "статистика")
-              CONTENT+="*СТАТИСТИКА*\n\n"
+              CONTENT="СТАТИСТИКА\n\n"
               CONTENT+="Здесь будет ваша статистика...\n"
               ;;
             *)
-              CONTENT+="*РЕЖИМ: $PERIOD*\n\n"
-              CONTENT+="*Что бы ты хотел сделать?*\n"
+              CONTENT="РЕЖИМ: $PERIOD\n\n"
+              CONTENT+="Что бы ты хотел сделать?\n"
               CONTENT+="• Запланировать задачи\n"
               CONTENT+="• Поставить цели\n"
               CONTENT+="• Посмотреть статистику\n"
@@ -161,41 +166,42 @@ jobs:
               ;;
           esac
           
-          echo "content<<EOF" >> $GITHUB_OUTPUT
-          echo "$CONTENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "content=$CONTENT" >> $GITHUB_OUTPUT
 
-      - name: Отправляем основное сообщение
+      - name: Формируем финальное сообщение
+        id: final_message
+        run: |
+          # Основное сообщение
+          MESSAGE="${{ steps.time_of_day.outputs.greeting }}\n"
+          MESSAGE+="${{ steps.select_messages.outputs.greeting }}\n\n"
+          
+          MESSAGE+="${{ steps.time_of_day.outputs.weekday }}, ${{ steps.time_of_day.outputs.today }}\n"
+          MESSAGE+="Сейчас: ${{ steps.time_of_day.outputs.current_time }}\n\n"
+          
+          MESSAGE+="${{ steps.generate_content.outputs.content }}\n\n"
+          
+          MESSAGE+="Совет:\n"
+          MESSAGE+="${{ steps.select_messages.outputs.tip }}\n\n"
+          
+          MESSAGE+="${{ steps.select_messages.outputs.motivation }}\n\n"
+          
+          # Добавляем статистику, если есть
+          if [ "${{ steps.check_stats.outputs.has_stats }}" = "true" ]; then
+            MESSAGE+="${{ steps.check_stats.outputs.stats_text }}"
+          fi
+          
+          MESSAGE+="Хорошего ${{ steps.determine_period.outputs.period }}а!\n"
+          MESSAGE+="Ответь на это сообщение с твоими планами!"
+          
+          echo "message=$MESSAGE" >> $GITHUB_OUTPUT
+
+      - name: Отправляем сообщение
         uses: appleboy/telegram-action@master
         with:
           to: ${{ secrets.TELEGRAM_CHAT_ID }}
           token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           message: |
-            ${{ steps.time_of_day.outputs.greeting }}
-            ${{ steps.select_messages.outputs.greeting }}
-            
-            *${{ steps.time_of_day.outputs.weekday }}, ${{ steps.time_of_day.outputs.today }}*
-            Сейчас: $(date +"%H:%M")
-            
-            ${{ steps.generate_content.outputs.content }}
-            
-            *Совет:*
-            ${{ steps.select_messages.outputs.tip }}
-            
-            ${{ steps.select_messages.outputs.motivation }}
-            
-            @if (steps.check_stats.outputs.has_stats == 'true')
-            {
-            *Твоя статистика:*
-            Дней с ассистентом: ${{ steps.check_stats.outputs.days_active }}
-            Выполнено задач: ${{ steps.check_stats.outputs.tasks_completed }}
-            Продуктивность: ${{ steps.check_stats.outputs.productivity_score }}/100
-            Серия дней: ${{ steps.check_stats.outputs.streak_days }}
-            }
-            
-            *Хорошего ${{ steps.determine_period.outputs.period }}а!*
-            *Ответь на это сообщение с твоими планами!*
-          parse_mode: markdown
+            ${{ steps.final_message.outputs.message }}
 
       - name: Обновляем статистику
         run: |
